@@ -27,6 +27,9 @@ endif ()
 
 add_executable(gpu main.cu gpu.cu common.h)
 target_compile_features(gpu PRIVATE cxx_std_11)
+add_executable(opt main.cu opt.cu common.h)
+target_compile_features(opt PRIVATE cxx_std_11)
 
 # Copy the job scripts
 configure_file(job-gpu job-gpu COPYONLY)
+configure_file(job-opt job-opt COPYONLY)
