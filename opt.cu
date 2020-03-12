@@ -55,19 +55,15 @@ __device__ int inline get_bin_id(particle_t& particle, int bins_per_row, int bin
     return y * bins_per_row + x;
 }
 
-__device__ void clear(int bin_count, int* heads) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= bin_count)
-        return;
-    heads[tid] = -1;
-}
 
 __global__ void rebin(particle_t* particles, int num_parts, int bins_per_row, int bin_count, double bin_size, int* heads, int* linked_list) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid < bin_count) {
+        heads[tid] = -1;
+    }
     if (tid >= num_parts)
         return;
-    clear(bin_count, heads);
     int bin_id = get_bin_id(particles[tid], bins_per_row, bin_count, bin_size);
     linked_list[tid] = atomicExch(&heads[bin_id], tid);
 }
@@ -178,12 +174,13 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     bin_size = size / bins_per_row;
     cudaMalloc((void**)&heads, bin_count * sizeof(int));
     cudaMalloc((void**)&linked_list, num_parts * sizeof(int));
-    rebin<<<blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size, heads, linked_list);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // parts live in GPU memory
     // Rewrite this function
+    int tmp_blks = (bin_count + NUM_THREADS - 1) / NUM_THREADS;
+    rebin<<<tmp_blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size, heads, linked_list);
 
     // Compute forces
     compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size, heads, linked_list);
@@ -191,5 +188,4 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // Move particles
     move_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, size);
 
-    rebin<<<blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size, heads, linked_list);
 }
