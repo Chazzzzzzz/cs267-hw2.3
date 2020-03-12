@@ -1,6 +1,6 @@
 #include "common.h"
 #include <cuda.h>
-
+#include <stdio.h>
 #define NUM_THREADS 256
 
 // Put any static global variables here that you will use throughout the simulation.
@@ -10,8 +10,8 @@ int bins_per_row;
 int bin_count;
 int bin_size;
 
-__device__ int* heads;
-__device__ int* linked_list;
+int* heads;
+int* linked_list;
 
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
@@ -55,21 +55,17 @@ __device__ int inline get_bin_id(particle_t& particle, int bins_per_row, int bin
     return y * bins_per_row + x;
 }
 
-__device__ void clear(int bin_count) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= bin_count)
-        return;
-    heads[tid] = -1;
-}
-
 __global__ void rebin(particle_t* particles, int num_parts, int bins_per_row, int bin_count, int bin_size, int* heads, int* linked_list) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
         return;
-    clear(bin_count);
+    heads[tid] = -1;
+    printf("after heads");
     int bin_id = get_bin_id(particles[tid], bins_per_row, bin_count, bin_size);
+    printf("begin linked_list");
     linked_list[tid] = atomicExch(&heads[bin_id], tid);
+    printf("after linked_list");
 }
 
 __device__ bool inline has_up(int bin_id, int bins_per_row, int bin_count, int bin_size) {
@@ -85,14 +81,14 @@ __device__ bool inline has_right(int bin_id, int bins_per_row, int bin_count, in
     return bin_id % bins_per_row != bins_per_row - 1;
 }
 
-__device__ void inline loop(particle_t* parts, int i, int another_bin_id) {
+__device__ void inline loop(particle_t* parts, int i, int another_bin_id, int* heads, int* linked_list) {
     int ptr = heads[another_bin_id];
     for (; ptr != -1; ptr = linked_list[ptr]) {
         apply_force_gpu(parts[i], parts[ptr]);
     }
 }
 
-__global__ void compute_forces_gpu(particle_t* particles, int num_parts, int bins_per_row, int bin_count, int bin_size) {
+__global__ void compute_forces_gpu(particle_t* particles, int num_parts, int bins_per_row, int bin_count, int bin_size, int* heads, int* linked_list) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
@@ -101,38 +97,38 @@ __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int bin
     particles[tid].ax = particles[tid].ay = 0;
     int bin_id = get_bin_id(particles[tid], bins_per_row, bin_count, bin_size);
     // self
-    loop(particles, tid, bin_id);
+    loop(particles, tid, bin_id, heads, linked_list);
     // up
     if (has_up(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id - bins_per_row);
+        loop(particles, tid, bin_id - bins_per_row, heads, linked_list);
     }
     // up right
     if (has_up(bin_id, bins_per_row, bin_count, bin_size) && has_right(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id - bins_per_row + 1);
+        loop(particles, tid, bin_id - bins_per_row + 1, heads, linked_list);
     }
     // right
     if (has_right(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id + 1);
+        loop(particles, tid, bin_id + 1, heads, linked_list);
     }
     // down right
     if (has_down(bin_id, bins_per_row, bin_count, bin_size) && has_right(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id + bins_per_row + 1);
+        loop(particles, tid, bin_id + bins_per_row + 1, heads, linked_list);
     }
     // down
     if (has_down(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id + bins_per_row);
+        loop(particles, tid, bin_id + bins_per_row, heads, linked_list);
     }
     // down left
     if (has_down(bin_id, bins_per_row, bin_count, bin_size) && has_left(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id + bins_per_row - 1);
+        loop(particles, tid, bin_id + bins_per_row - 1, heads, linked_list);
     }
     // left
     if (has_left(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id - 1);
+        loop(particles, tid, bin_id - 1, heads, linked_list);
     }
     // up left
     if (has_up(bin_id, bins_per_row, bin_count, bin_size) && has_left(bin_id, bins_per_row, bin_count, bin_size)) {
-        loop(particles, tid, bin_id - bins_per_row - 1);
+        loop(particles, tid, bin_id - bins_per_row - 1, heads, linked_list);
     }
 }
 
@@ -186,7 +182,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     // Rewrite this function
 
     // Compute forces
-    compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size);
+    compute_forces_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size, heads, linked_list);
 
     // Move particles
     move_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, size);
