@@ -8,7 +8,7 @@ int blks;
 
 int bins_per_row;
 int bin_count;
-int bin_size;
+double bin_size;
 
 int* heads;
 int* linked_list;
@@ -42,7 +42,7 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
    v
 */
 
-__device__ int inline get_bin_id(particle_t& particle, int bins_per_row, int bin_count, int bin_size) {
+__device__ int inline get_bin_id(particle_t& particle, int bins_per_row, int bin_count, double bin_size) {
     int x, y;
     y = particle.y / bin_size;
     x = particle.x / bin_size;
@@ -55,29 +55,33 @@ __device__ int inline get_bin_id(particle_t& particle, int bins_per_row, int bin
     return y * bins_per_row + x;
 }
 
-__global__ void rebin(particle_t* particles, int num_parts, int bins_per_row, int bin_count, int bin_size, int* heads, int* linked_list) {
+__device__ void clear(int bin_count, int* heads) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tid >= bin_count)
+        return;
+    heads[tid] = -1;
+}
+
+__global__ void rebin(particle_t* particles, int num_parts, int bins_per_row, int bin_count, double bin_size, int* heads, int* linked_list) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
         return;
-    heads[tid] = -1;
-    printf("after heads");
+    clear(bin_count, heads);
     int bin_id = get_bin_id(particles[tid], bins_per_row, bin_count, bin_size);
-    printf("begin linked_list");
     linked_list[tid] = atomicExch(&heads[bin_id], tid);
-    printf("after linked_list");
 }
 
-__device__ bool inline has_up(int bin_id, int bins_per_row, int bin_count, int bin_size) {
+__device__ bool inline has_up(int bin_id, int bins_per_row, int bin_count, double bin_size) {
     return bin_id - bins_per_row > -1;
 }
-__device__ bool inline has_down(int bin_id, int bins_per_row, int bin_count, int bin_size) {
+__device__ bool inline has_down(int bin_id, int bins_per_row, int bin_count, double bin_size) {
     return bin_id + bins_per_row < bin_count;
 }
-__device__ bool inline has_left(int bin_id, int bins_per_row, int bin_count, int bin_size) {
+__device__ bool inline has_left(int bin_id, int bins_per_row, int bin_count, double bin_size) {
     return bin_id % bins_per_row != 0;
 }
-__device__ bool inline has_right(int bin_id, int bins_per_row, int bin_count, int bin_size) {
+__device__ bool inline has_right(int bin_id, int bins_per_row, int bin_count, double bin_size) {
     return bin_id % bins_per_row != bins_per_row - 1;
 }
 
@@ -88,7 +92,7 @@ __device__ void inline loop(particle_t* parts, int i, int another_bin_id, int* h
     }
 }
 
-__global__ void compute_forces_gpu(particle_t* particles, int num_parts, int bins_per_row, int bin_count, int bin_size, int* heads, int* linked_list) {
+__global__ void compute_forces_gpu(particle_t* particles, int num_parts, int bins_per_row, int bin_count, double bin_size, int* heads, int* linked_list) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
