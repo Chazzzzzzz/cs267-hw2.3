@@ -62,7 +62,7 @@ __device__ void clear(int bin_count) {
     heads[tid] = -1;
 }
 
-__global__ void rebin(particle_t* particles, int num_parts, int bins_per_row, int bin_count, int bin_size) {
+__global__ void rebin(particle_t* particles, int num_parts, int bins_per_row, int bin_count, int bin_size, int* heads, int* linked_list) {
     // Get thread (particle) ID
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
@@ -178,6 +178,7 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     bin_size = size / bins_per_row;
     cudaMalloc((void**)&heads, bin_count * sizeof(int));
     cudaMalloc((void**)&linked_list, num_parts * sizeof(int));
+    rebin<<<blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size, heads, linked_list);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
@@ -189,4 +190,6 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
 
     // Move particles
     move_gpu<<<blks, NUM_THREADS>>>(parts, num_parts, size);
+
+    rebin<<<blks, NUM_THREADS>>>(parts, num_parts, bins_per_row, bin_count, bin_size, heads, linked_list);
 }
